@@ -4,7 +4,7 @@
    - Kacheln (.png, fremde Hosts): stale-while-revalidate, mit Größenlimit
    - API-Daten (RainViewer, Open-Meteo): network-first mit Cache-Fallback */
 
-const VERSION = "v4";
+const VERSION = "v5";
 const SHELL = "shell-" + VERSION;
 const TILES = "tiles-" + VERSION;
 const DATA  = "data-"  + VERSION;
@@ -20,9 +20,8 @@ const PRECACHE = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(SHELL).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting())
-  );
+  // kein skipWaiting: neue Version wartet, bis der Nutzer im Update-Hinweis bestätigt
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(PRECACHE)));
 });
 
 self.addEventListener("activate", (e) => {
