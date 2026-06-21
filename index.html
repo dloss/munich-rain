@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
 <title>Regenradar München</title>
 <meta name="description" content="Animiertes Regenradar für München — letzte 2 Stunden plus Nowcast, Daten von RainViewer." />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<meta name="theme-color" content="#0C1320" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="vendor/fonts/fonts.css" />
+<link rel="stylesheet" href="vendor/leaflet/leaflet.min.css" />
 <style>
   :root{
     --ink:#EAF1F8; --muted:#9AA9BD; --panel:rgba(18,27,40,.78);
@@ -35,6 +36,8 @@
   }
   .title{display:flex; flex-direction:column; gap:3px; min-width:0}
   .eyebrow{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); font-weight:600}
+  .net{margin-left:8px; padding:2px 7px; border-radius:999px; font-size:10px;
+       letter-spacing:.04em; text-transform:none; color:#0C1320; background:var(--now); font-weight:700}
   .stamp{font-family:var(--display); font-weight:600; font-size:1.05rem; font-variant-numeric:tabular-nums; white-space:nowrap}
   .stamp .kind{color:var(--muted); font-weight:500; font-size:.82em}
   .stamp .kind.fc{color:var(--now)}
@@ -137,7 +140,7 @@
 
   <header class="panel head">
     <div class="title">
-      <span class="eyebrow">Regenradar · München</span>
+      <span class="eyebrow">Regenradar · München<span class="net" id="net" hidden></span></span>
       <span class="stamp" id="stamp">lädt…</span>
     </div>
   </header>
@@ -179,7 +182,7 @@
     </div>
   </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="vendor/leaflet/leaflet.min.js"></script>
 <script>
 (() => {
   "use strict";
@@ -193,6 +196,21 @@
   const OPACITY = 0.85, STEP_MS = 500, PAUSE_MS = 1100, REFRESH_MS = 5 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
+
+  // fetch mit Timeout — bei schlechtem Empfang nicht ewig hängen bleiben
+  function fetchTimeout(url, opts, ms){
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, Object.assign({ signal: ctrl.signal }, opts))
+      .finally(() => clearTimeout(t));
+  }
+
+  // Netz-/Frische-Badge im Kopf (leerer Text = ausblenden)
+  function setNet(text){
+    const n = $("net");
+    if (text){ n.textContent = text; n.hidden = false; }
+    else { n.hidden = true; }
+  }
 
   // Karte + dunkle Basiskarte
   const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(CENTER, ZOOM);
@@ -333,16 +351,21 @@
   async function load(){
     if (busy) return; busy = true;
     try{
-      const res = await fetch(API, { cache: "no-store" });
+      const res = await fetchTimeout(API, { cache: "no-store" }, 12000);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const json = await res.json();
       const wasPlaying = playing;
       pause();
       rebuild(json);
       if (wasPlaying) play();
+      setNet("");                       // aktueller Stand
     }catch(e){
       console.error(e);
-      $("overlay").classList.add("show");
+      if (frames.length){               // letzten Stand behalten, nur markieren
+        setNet(navigator.onLine ? "veraltet" : "offline");
+      } else {                          // noch nie etwas geladen → Overlay
+        $("overlay").classList.add("show");
+      }
     }finally{ busy = false; }
   }
 
@@ -386,11 +409,14 @@
 
   async function loadForecast(){
     try{
-      const res = await fetch(FC_API, { cache: "no-store" });
+      const res = await fetchTimeout(FC_API, { cache: "no-store" }, 12000);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const json = await res.json();
       renderForecast(json.hourly || {});
-    }catch(e){ console.error("forecast", e); $("fc").hidden = true; }
+    }catch(e){
+      console.error("forecast", e);
+      if (!$("bars").children.length) $("fc").hidden = true;  // sonst letzten Stand behalten
+    }
   }
 
   // Events
@@ -398,10 +424,19 @@
   $("scrub").addEventListener("input", (e) => { pause(); show(parseInt(e.target.value, 10)); });
   $("retry").addEventListener("click", load);
   document.addEventListener("visibilitychange", () => { if (!document.hidden){ load(); loadForecast(); } });
+  window.addEventListener("online", () => { setNet(""); load(); loadForecast(); });
+  window.addEventListener("offline", () => { if (frames.length) setNet("offline"); });
   setInterval(() => { load(); loadForecast(); }, REFRESH_MS);
 
   load();
   loadForecast();
+
+  // Service Worker: Offline-Fähigkeit + Caching
+  if ("serviceWorker" in navigator){
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW", e));
+    });
+  }
 })();
 </script>
 </body>
