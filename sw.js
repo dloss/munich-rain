@@ -4,7 +4,7 @@
    - Kacheln (.png, fremde Hosts): stale-while-revalidate, mit Größenlimit
    - API-Daten (RainViewer, Open-Meteo): network-first mit Cache-Fallback */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = "shell-" + VERSION;
 const TILES = "tiles-" + VERSION;
 const DATA  = "data-"  + VERSION;

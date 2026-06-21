@@ -131,6 +131,17 @@
     background:var(--panel)!important; color:var(--ink)!important; border:1px solid var(--line)!important;
     -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
   }
+  /* Standort-Button */
+  .leaflet-control.locate{margin-right:12px!important}
+  .leaflet-control.locate a{
+    display:block; width:30px; height:30px; line-height:30px; text-align:center;
+    background:var(--panel)!important; color:var(--ink)!important; border:1px solid var(--line)!important;
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+  }
+  .leaflet-control.locate a:hover{background:rgba(255,255,255,.1)!important}
+  .leaflet-control.locate a.on{color:var(--now)!important}
+  .leaflet-control.locate svg{width:16px; height:16px; vertical-align:middle;
+    fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round}
   .leaflet-control-attribution{
     background:rgba(12,19,32,.7)!important; color:var(--muted)!important; font-size:10px!important;
   }
@@ -251,6 +262,72 @@
 
   // Karte automatisch auf die Stadtgrenze einpassen
   map.fitBounds(border.getBounds(), { padding: [24, 24] });
+
+  // Optional: eigener Standort per GPS (Button nur, wenn die API verfügbar ist)
+  let geoWatch = null, geoDot = null, geoAcc = null, geoActive = false, geoFirst = true;
+  map.createPane("loc");
+  map.getPane("loc").style.zIndex = 460;            // über Labels (450) und Grenze (400)
+  const locRenderer = L.svg({ pane: "loc" });
+
+  function geoStop(){
+    if (geoWatch != null){ navigator.geolocation.clearWatch(geoWatch); geoWatch = null; }
+    if (geoDot){ map.removeLayer(geoDot); geoDot = null; }
+    if (geoAcc){ map.removeLayer(geoAcc); geoAcc = null; }
+    geoActive = false;
+    const b = $("locate"); if (b) b.classList.remove("on");
+  }
+
+  function onGeo(pos){
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    const acc = pos.coords.accuracy || 0;
+    if (!geoDot){
+      geoAcc = L.circle(ll, { radius: acc, renderer: locRenderer, pane: "loc",
+        color: "#4DA3FF", weight: 1, opacity: .4, fillColor: "#4DA3FF", fillOpacity: .12,
+        interactive: false }).addTo(map);
+      geoDot = L.circleMarker(ll, { radius: 6, renderer: locRenderer, pane: "loc",
+        color: "#fff", weight: 2, fillColor: "#4DA3FF", fillOpacity: 1 })
+        .addTo(map).bindTooltip("Dein Standort");
+    } else {
+      geoDot.setLatLng(ll); geoAcc.setLatLng(ll).setRadius(acc);
+    }
+    if (geoFirst){ geoFirst = false; map.setView(ll, Math.max(map.getZoom(), 12)); }
+  }
+
+  function onGeoErr(err){
+    console.warn("geo", err);
+    if (err.code === 1){                       // Freigabe verweigert → abschalten
+      geoStop();
+      const b = $("locate"); if (b) b.title = "Standortfreigabe verweigert";
+    }
+    // Timeout/unavailable: watchPosition läuft weiter, nichts tun
+  }
+
+  function geoStart(){
+    geoActive = true; geoFirst = true;
+    const b = $("locate"); if (b) b.classList.add("on");
+    geoWatch = navigator.geolocation.watchPosition(onGeo, onGeoErr, {
+      enableHighAccuracy: true, maximumAge: 10000, timeout: 15000
+    });
+  }
+
+  if ("geolocation" in navigator){
+    const LocateCtl = L.Control.extend({
+      options: { position: "topright" },
+      onAdd(){
+        const div = L.DomUtil.create("div", "leaflet-bar locate");
+        const a = L.DomUtil.create("a", "", div);
+        a.href = "#"; a.id = "locate"; a.title = "Mein Standort";
+        a.setAttribute("role", "button"); a.setAttribute("aria-label", "Mein Standort");
+        a.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/>'
+          + '<line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>'
+          + '<line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>';
+        L.DomEvent.on(a, "click", L.DomEvent.stop);
+        L.DomEvent.on(a, "click", () => geoActive ? geoStop() : geoStart());
+        return div;
+      }
+    });
+    map.addControl(new LocateCtl());
+  }
 
   let host = "", frames = [], idx = 0, nowIdx = 0, timer = null, playing = false;
   const layers = {};
