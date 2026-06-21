@@ -31,8 +31,8 @@
 
   /* Kopf */
   .head{
-    top:max(12px,env(safe-area-inset-top)); left:12px; right:12px;
-    padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px;
+    top:max(12px,env(safe-area-inset-top)); left:12px; right:auto;
+    padding:9px 14px; display:flex; align-items:center; gap:12px;
   }
   .title{display:flex; flex-direction:column; gap:3px; min-width:0}
   .eyebrow{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); font-weight:600}
@@ -93,7 +93,9 @@
             background:linear-gradient(90deg,#9BE1F5,#3FA0E0,#2C6FC6,#7E58C8)}
 
   /* Stundenvorhersage (Open-Meteo) */
-  .fc{display:flex; flex-direction:column; gap:6px}
+  .fc{display:flex; flex-direction:column; gap:6px;
+      padding-bottom:10px; border-bottom:1px solid var(--line)}  /* trennt von Radar-Zeitstrahl */
+  .bars[hidden], .hours[hidden]{display:none}
   .fc-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
   .fc-title{font-size:11px; letter-spacing:.08em; text-transform:uppercase;
             color:var(--muted); font-weight:600}
@@ -124,7 +126,7 @@
   .box button:focus-visible{outline:2px solid var(--now); outline-offset:2px}
 
   /* Leaflet auf dunkel abstimmen */
-  .leaflet-control-zoom{border:none!important; margin-top:84px!important; margin-right:12px!important}
+  .leaflet-control-zoom{border:none!important; margin-top:12px!important; margin-right:12px!important}
   .leaflet-control-zoom a{
     background:var(--panel)!important; color:var(--ink)!important; border:1px solid var(--line)!important;
     -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
@@ -224,7 +226,8 @@
   map.createPane("labels");
   map.getPane("labels").style.zIndex = 450;          // über Radar (200) und Stadtgrenze (400)
   map.getPane("labels").style.pointerEvents = "none";
-  map.getPane("labels").style.filter = "brightness(1.9)";
+  map.getPane("labels").style.filter = "brightness(1.35)";   // hellgrau, nicht fett-weiß
+  map.getPane("labels").style.opacity = "0.82";              // tritt hinter Regen/Grenze zurück
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", {
     subdomains: "abcd", maxZoom: 19, pane: "labels"
   }).addTo(map);
@@ -403,7 +406,10 @@
       s.textContent = times[i].slice(11, 13);    // Stunde
       hours.appendChild(s);
     }
-    $("fcNote").textContent = max < 0.05 ? "kein Regen erwartet" : "bis " + max.toFixed(1) + " mm/h";
+    const dry = max < 0.05;
+    $("bars").hidden = dry;                      // bei Trockenheit auf eine Zeile einklappen
+    $("hours").hidden = dry;
+    $("fcNote").textContent = dry ? "kein Regen erwartet" : "bis " + max.toFixed(1) + " mm/h";
     $("fc").hidden = false;
   }
 
