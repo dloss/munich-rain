@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Regenradar München</title>
+<meta name="description" content="Animiertes Regenradar für München — letzte 2 Stunden plus Nowcast, Daten von RainViewer." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --ink:#EAF1F8; --muted:#9AA9BD; --panel:rgba(18,27,40,.78);
+    --line:rgba(255,255,255,.10); --now:#F4C04E;
+    --display:"Space Grotesk",system-ui,sans-serif;
+    --body:"Inter",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--body); background:#0C1320; color:var(--ink)}
+  #map{position:fixed; inset:0; background:#0C1320}
+
+  .panel{
+    position:fixed; z-index:1000;
+    background:var(--panel); border:1px solid var(--line);
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+    border-radius:16px; box-shadow:0 18px 44px -24px rgba(0,0,0,.8);
+  }
+
+  /* Kopf */
+  .head{
+    top:max(12px,env(safe-area-inset-top)); left:12px; right:12px;
+    padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  .title{display:flex; flex-direction:column; gap:3px; min-width:0}
+  .eyebrow{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); font-weight:600}
+  .stamp{font-family:var(--display); font-weight:600; font-size:1.05rem; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .stamp .kind{color:var(--muted); font-weight:500; font-size:.82em}
+  .stamp .kind.fc{color:var(--now)}
+
+  /* Steuerung unten */
+  .controls{
+    left:12px; right:12px; bottom:max(14px,env(safe-area-inset-bottom));
+    padding:12px 14px; display:flex; flex-direction:column; gap:10px;
+  }
+  .row{display:flex; align-items:center; gap:12px}
+  .play{
+    flex:0 0 auto; width:42px; height:42px; border-radius:50%;
+    border:1px solid var(--line); background:rgba(255,255,255,.05); color:var(--ink);
+    cursor:pointer; display:grid; place-items:center; transition:background .2s,border-color .2s;
+  }
+  .play:hover{background:rgba(255,255,255,.1)}
+  .play:focus-visible{outline:2px solid var(--now); outline-offset:2px}
+  .play svg{width:18px; height:18px; fill:currentColor}
+
+  input[type=range]{
+    -webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:999px;
+    background:linear-gradient(90deg, rgba(255,255,255,.5) var(--pct,0%), rgba(255,255,255,.14) var(--pct,0%));
+    outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:var(--ink); border:2px solid #0C1320; cursor:pointer;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%; background:var(--ink); border:2px solid #0C1320; cursor:pointer;
+  }
+  /* Zeitachse unter dem Slider (an Slider-Anfang ausgerichtet: 42px Button + 12px Gap) */
+  .axis{position:relative; margin-left:54px; height:40px; padding-top:13px}
+  .axis .now{position:absolute; top:0; transform:translateX(-50%);
+             color:var(--now); font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+             font-size:9px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .ticks{position:relative; height:8px}
+  .ticks i{position:absolute; top:0; width:1px; height:5px; background:rgba(255,255,255,.28);
+           transform:translateX(-50%)}
+  .ticks i.fc{background:rgba(244,192,78,.45)}
+  .ticks i.now{height:8px; width:2px; background:var(--now)}
+  .labels{position:relative; height:14px; margin-top:3px;
+          font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .labels span{position:absolute; white-space:nowrap}
+  .labels .start{left:0}
+  .labels .end{right:0}
+
+  .meta{display:flex; align-items:center; justify-content:space-between; gap:10px;
+        font-size:11px; color:var(--muted)}
+  .meta a{color:var(--muted)} .meta a:hover{color:var(--ink)}
+  .legend{display:flex; align-items:center; gap:6px}
+  .legend i{width:34px; height:7px; border-radius:3px; display:inline-block;
+            background:linear-gradient(90deg,#9BE1F5,#3FA0E0,#2C6FC6,#7E58C8)}
+
+  /* Stundenvorhersage (Open-Meteo) */
+  .fc{display:flex; flex-direction:column; gap:6px}
+  .fc-head{display:flex; align-items:baseline; justify-content:space-between; gap:8px}
+  .fc-title{font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+            color:var(--muted); font-weight:600}
+  .fc-note{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .bars{display:flex; align-items:flex-end; gap:3px; height:46px}
+  .bars .b{flex:1 1 0; min-width:0; height:100%;
+           display:flex; flex-direction:column; justify-content:flex-end}
+  .bars .b .fill{width:100%; min-height:2px; border-radius:3px 3px 0 0; background:#3FA0E0}
+  .bars .b.dry .fill{background:rgba(255,255,255,.12)}
+  .hours{display:flex; gap:3px; font-size:9px; color:var(--muted);
+         font-variant-numeric:tabular-nums}
+  .hours span{flex:1 1 0; min-width:0; text-align:center}
+
+  /* Status */
+  .overlay{
+    inset:0; z-index:1100; position:fixed; display:none; place-items:center; padding:24px;
+    background:rgba(12,19,32,.6); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
+  }
+  .overlay.show{display:grid}
+  .box{max-width:340px; text-align:center}
+  .box .h{font-family:var(--display); font-weight:600; font-size:1.4rem; margin:0 0 8px}
+  .box .p{color:var(--muted); margin:0 0 16px; font-size:.95rem}
+  .box button{
+    appearance:none; border:1px solid var(--line); background:rgba(255,255,255,.06);
+    color:var(--ink); font-family:var(--body); font-weight:600; font-size:.9rem;
+    padding:9px 16px; border-radius:999px; cursor:pointer;
+  }
+  .box button:focus-visible{outline:2px solid var(--now); outline-offset:2px}
+
+  /* Leaflet auf dunkel abstimmen */
+  .leaflet-control-zoom{border:none!important; margin-top:84px!important; margin-right:12px!important}
+  .leaflet-control-zoom a{
+    background:var(--panel)!important; color:var(--ink)!important; border:1px solid var(--line)!important;
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+  }
+  .leaflet-control-attribution{
+    background:rgba(12,19,32,.7)!important; color:var(--muted)!important; font-size:10px!important;
+  }
+  .leaflet-control-attribution a{color:var(--muted)!important}
+</style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <header class="panel head">
+    <div class="title">
+      <span class="eyebrow">Regenradar · München</span>
+      <span class="stamp" id="stamp">lädt…</span>
+    </div>
+  </header>
+
+  <section class="panel controls" id="controls" hidden>
+    <div class="fc" id="fc" hidden>
+      <div class="fc-head">
+        <span class="fc-title">Regen · nächste 12 h</span>
+        <span class="fc-note" id="fcNote"></span>
+      </div>
+      <div class="bars" id="bars"></div>
+      <div class="hours" id="hours"></div>
+    </div>
+    <div class="row">
+      <button class="play" id="play" type="button" aria-label="Abspielen">
+        <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Zeitpunkt wählen" />
+    </div>
+    <div class="axis">
+      <span class="now" id="tNow">Jetzt</span>
+      <div class="ticks" id="ticks"></div>
+      <div class="labels">
+        <span class="start" id="tStart"></span>
+        <span class="end" id="tEnd"></span>
+      </div>
+    </div>
+    <div class="meta">
+      <span class="legend"><i></i> mehr Regen →</span>
+      <span>Daten: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a></span>
+    </div>
+  </section>
+
+  <div class="overlay" id="overlay">
+    <div class="box">
+      <p class="h" id="ovh">Radar nicht geladen</p>
+      <p class="p" id="ovp">Verbindung prüfen und neu laden.</p>
+      <button id="retry" type="button">Neu laden</button>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  const CENTER = [48.1374, 11.5755], ZOOM = 8;      // München
+  const API = "https://api.rainviewer.com/public/weather-maps.json";
+  const FC_API = "https://api.open-meteo.com/v1/forecast?latitude=48.1374&longitude=11.5755"
+    + "&hourly=precipitation,precipitation_probability&timezone=Europe%2FBerlin&forecast_hours=12";
+  const FC_HOURS = 12;
+  const SIZE = 256, COLOR = 2, OPTIONS = "1_1";      // Farbschema 2, geglättet, mit Schnee
+  const OPACITY = 0.85, STEP_MS = 500, PAUSE_MS = 1100, REFRESH_MS = 5 * 60 * 1000;
+
+  const $ = (id) => document.getElementById(id);
+
+  // Karte + dunkle Basiskarte
+  const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(CENTER, ZOOM);
+  L.control.zoom({ position: "topright" }).addTo(map);
+  // Basiskarte ohne Beschriftung
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", {
+    attribution: "© OpenStreetMap · © CARTO", subdomains: "abcd", maxZoom: 19
+  }).addTo(map);
+
+  // Beschriftungen (Ortsteile etc.) als eigene Ebene – über dem Radar, aufgehellt für mehr Kontrast
+  map.createPane("labels");
+  map.getPane("labels").style.zIndex = 450;          // über Radar (200) und Stadtgrenze (400)
+  map.getPane("labels").style.pointerEvents = "none";
+  map.getPane("labels").style.filter = "brightness(1.9)";
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd", maxZoom: 19, pane: "labels"
+  }).addTo(map);
+
+  // Stadtgrenze München (OSM-Relation 62428, vereinfacht)
+  const MUC_BOUNDARY = {"type":"Polygon","coordinates":[[[11.3608,48.1581],[11.3712,48.1584],[11.3698,48.1568],[11.3749,48.156],[11.3739,48.1555],[11.3739,48.1536],[11.3829,48.1531],[11.3832,48.1497],[11.384,48.149],[11.3855,48.1497],[11.3872,48.1473],[11.3891,48.1479],[11.3913,48.1419],[11.3895,48.1412],[11.3922,48.1367],[11.3882,48.1346],[11.3894,48.1317],[11.3887,48.1297],[11.3896,48.1279],[11.393,48.1285],[11.3944,48.1255],[11.4023,48.1252],[11.4129,48.1275],[11.4226,48.1325],[11.4263,48.1365],[11.43,48.1376],[11.4364,48.1367],[11.4386,48.1354],[11.4381,48.1346],[11.4475,48.1336],[11.4481,48.1312],[11.4498,48.1329],[11.4534,48.1331],[11.4601,48.132],[11.4595,48.1309],[11.4637,48.1299],[11.465,48.1282],[11.4657,48.1185],[11.4651,48.1147],[11.4634,48.1145],[11.463,48.1053],[11.4696,48.1052],[11.4697,48.1058],[11.4749,48.1046],[11.4709,48.0994],[11.4741,48.0954],[11.4721,48.0901],[11.4763,48.0888],[11.4709,48.0832],[11.4733,48.0822],[11.4719,48.0818],[11.4729,48.0812],[11.4734,48.0822],[11.487,48.0764],[11.4858,48.0742],[11.4871,48.0738],[11.488,48.075],[11.4866,48.0754],[11.4872,48.0763],[11.5036,48.0693],[11.5026,48.0669],[11.5042,48.0624],[11.5088,48.0616],[11.5115,48.0644],[11.5156,48.0634],[11.517,48.0664],[11.5188,48.0673],[11.5221,48.0673],[11.523,48.0665],[11.5239,48.0684],[11.5282,48.069],[11.5315,48.0762],[11.5335,48.0777],[11.5424,48.0779],[11.5418,48.0746],[11.5436,48.0735],[11.5441,48.0683],[11.5454,48.0681],[11.549,48.0746],[11.5499,48.0747],[11.5492,48.0749],[11.554,48.085],[11.5625,48.0836],[11.5629,48.0852],[11.5869,48.0939],[11.5886,48.0934],[11.5926,48.0851],[11.6018,48.0873],[11.6035,48.0851],[11.6065,48.0868],[11.612,48.087],[11.6117,48.0881],[11.6238,48.0881],[11.6237,48.0873],[11.633,48.086],[11.633,48.0843],[11.6656,48.0782],[11.6737,48.0788],[11.6857,48.0775],[11.6841,48.0792],[11.6835,48.0815],[11.681,48.0838],[11.6828,48.0918],[11.6887,48.0922],[11.6871,48.0935],[11.6891,48.094],[11.6889,48.0949],[11.7093,48.1026],[11.7127,48.1049],[11.7146,48.1108],[11.7089,48.1142],[11.7107,48.1156],[11.694,48.1193],[11.6976,48.1212],[11.6942,48.1231],[11.6977,48.1253],[11.7043,48.1214],[11.7107,48.124],[11.712,48.123],[11.7139,48.1243],[11.7162,48.1282],[11.7145,48.1296],[11.7134,48.1291],[11.7117,48.1301],[11.7144,48.1314],[11.7123,48.1334],[11.7145,48.134],[11.7153,48.1328],[11.7204,48.1343],[11.7197,48.1355],[11.7229,48.1371],[11.7205,48.1391],[11.718,48.1377],[11.7142,48.1387],[11.7101,48.1419],[11.7128,48.1432],[11.7109,48.1446],[11.7135,48.1455],[11.7101,48.1482],[11.6782,48.1443],[11.6798,48.1533],[11.6739,48.1565],[11.6857,48.1675],[11.6867,48.1697],[11.6858,48.1718],[11.6933,48.1706],[11.6961,48.1743],[11.6907,48.1782],[11.6956,48.18],[11.692,48.1825],[11.689,48.1828],[11.689,48.1818],[11.6868,48.1804],[11.6622,48.1829],[11.661,48.1817],[11.6611,48.1797],[11.6655,48.177],[11.6655,48.1762],[11.6509,48.175],[11.6459,48.1737],[11.641,48.1734],[11.6376,48.1743],[11.6359,48.1749],[11.6372,48.1764],[11.6314,48.1779],[11.6304,48.1771],[11.6277,48.1773],[11.629,48.1807],[11.6315,48.1831],[11.6293,48.1843],[11.6378,48.1979],[11.6391,48.2038],[11.6413,48.2061],[11.6481,48.2098],[11.6505,48.2134],[11.6505,48.217],[11.6392,48.2218],[11.6383,48.2242],[11.639,48.226],[11.6246,48.2292],[11.6224,48.2287],[11.6225,48.2276],[11.6142,48.2279],[11.6129,48.2256],[11.6094,48.2256],[11.6081,48.2257],[11.6075,48.2273],[11.6091,48.2276],[11.6089,48.2284],[11.6071,48.2282],[11.6075,48.2273],[11.6057,48.2268],[11.6116,48.2191],[11.6062,48.2192],[11.6063,48.2184],[11.6048,48.2183],[11.605,48.2175],[11.6018,48.2169],[11.6018,48.2134],[11.5875,48.2135],[11.5872,48.224],[11.5823,48.2286],[11.5606,48.227],[11.5468,48.2271],[11.5443,48.2293],[11.5417,48.2288],[11.5339,48.2305],[11.534,48.2314],[11.5311,48.2313],[11.5254,48.2413],[11.5133,48.2457],[11.5012,48.2481],[11.4907,48.2454],[11.4916,48.2419],[11.4909,48.2409],[11.4919,48.2397],[11.4915,48.2382],[11.4895,48.238],[11.49,48.2348],[11.4878,48.2321],[11.4889,48.2235],[11.4911,48.2231],[11.4703,48.2185],[11.4618,48.2145],[11.4576,48.2088],[11.4435,48.2064],[11.4324,48.2058],[11.4188,48.2028],[11.3908,48.2005],[11.3885,48.1908],[11.3923,48.1896],[11.3913,48.1856],[11.3933,48.1845],[11.3909,48.1814],[11.3853,48.1776],[11.3811,48.1793],[11.3711,48.1783],[11.369,48.1764],[11.3697,48.1743],[11.3678,48.1685],[11.3654,48.1643],[11.3628,48.163],[11.3608,48.1581]]]};
+
+  // dunkle Außenkante als Kontrast (Casing), darüber die helle Linie
+  L.geoJSON(MUC_BOUNDARY, {
+    interactive: false, pane: "overlayPane",
+    style: { color: "#0C1320", weight: 6, opacity: .65, fill: false, lineJoin: "round" }
+  }).addTo(map);
+  const border = L.geoJSON(MUC_BOUNDARY, {
+    interactive: false, pane: "overlayPane",
+    style: { color: "#F4C04E", weight: 2.5, opacity: .95,
+             fillColor: "#F4C04E", fillOpacity: .04, lineJoin: "round" }
+  }).addTo(map);
+
+  L.circleMarker(CENTER, { radius: 4, color: "#F4C04E", weight: 2, fillColor: "#0C1320", fillOpacity: 1 })
+    .addTo(map).bindTooltip("München");
+
+  // Karte automatisch auf die Stadtgrenze einpassen
+  map.fitBounds(border.getBounds(), { padding: [24, 24] });
+
+  let host = "", frames = [], idx = 0, nowIdx = 0, timer = null, playing = false;
+  const layers = {};
+
+  const fmt = (unix) => new Date(unix * 1000)
+    .toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+
+  function tileUrl(path){ return `${host}${path}/${SIZE}/{z}/{x}/{y}/${COLOR}/${OPTIONS}.png`; }
+
+  function ensureLayer(i){
+    const f = frames[i];
+    if (!layers[f.path]){
+      layers[f.path] = L.tileLayer(tileUrl(f.path), {
+        tileSize: SIZE, opacity: 0, maxNativeZoom: 7, maxZoom: 19, zIndex: 10,
+        attribution: "Weather data by RainViewer"
+      }).addTo(map);
+    }
+    return layers[f.path];
+  }
+
+  function updateLabel(){
+    const f = frames[idx];
+    const future = f.time * 1000 > Date.now();
+    $("stamp").innerHTML = `${fmt(f.time)} <span class="kind${future ? " fc" : ""}">`
+      + `${future ? "Vorhersage" : "Radar"}</span>`;
+    const s = $("scrub");
+    s.value = idx;
+    s.style.setProperty("--pct", (idx / Math.max(1, frames.length - 1) * 100) + "%");
+  }
+
+  function renderAxis(){
+    const n = frames.length, last = Math.max(1, n - 1);
+    const ticks = $("ticks");
+    ticks.innerHTML = "";
+    frames.forEach((f, i) => {
+      const t = document.createElement("i");
+      t.style.left = (i / last * 100) + "%";
+      t.className = i === nowIdx ? "now" : (i > nowIdx ? "fc" : "");
+      ticks.appendChild(t);
+    });
+    $("tStart").textContent = fmt(frames[0].time);
+    $("tEnd").textContent = fmt(frames[n - 1].time);
+    const now = $("tNow"), noFc = nowIdx >= n - 1;
+    now.textContent = "Jetzt " + fmt(frames[nowIdx].time);
+    // Ohne Vorhersage fällt „Jetzt" mit dem Ende zusammen → End-Label ausblenden,
+    // Marke rechtsbündig statt zentriert (sonst Überlappung / Abschneiden am Rand)
+    $("tEnd").style.display = noFc ? "none" : "";
+    if (noFc){
+      now.style.left = "auto"; now.style.right = "0"; now.style.transform = "none";
+    } else {
+      now.style.right = "auto"; now.style.left = (nowIdx / last * 100) + "%";
+      now.style.transform = "translateX(-50%)";
+    }
+  }
+
+  function show(i){
+    if (!frames.length) return;
+    i = ((i % frames.length) + frames.length) % frames.length;
+    const prev = frames[idx] ? frames[idx].path : null;
+    idx = i;
+    ensureLayer(i).setOpacity(OPACITY);
+    ensureLayer((i + 1) % frames.length);              // nächsten Frame vorladen
+    if (prev && prev !== frames[i].path && layers[prev]) layers[prev].setOpacity(0);
+    updateLabel();
+  }
+
+  function tick(){
+    show(idx + 1 >= frames.length ? 0 : idx + 1);
+    timer = setTimeout(tick, idx === frames.length - 1 ? PAUSE_MS : STEP_MS);
+  }
+  function play(){ if (playing) return; playing = true; setIcon(true); tick(); }
+  function pause(){ playing = false; setIcon(false); if (timer){ clearTimeout(timer); timer = null; } }
+  function setIcon(on){
+    $("playIcon").innerHTML = on
+      ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'   // Pause
+      : '<path d="M8 5v14l11-7z"/>';               // Play
+    $("play").setAttribute("aria-label", on ? "Pause" : "Abspielen");
+  }
+
+  function rebuild(json){
+    // alte Layer entfernen
+    Object.values(layers).forEach((l) => map.removeLayer(l));
+    for (const k in layers) delete layers[k];
+
+    host = json.host || "";
+    const past = (json.radar && json.radar.past) || [];
+    const now  = (json.radar && json.radar.nowcast) || [];
+    frames = [...past, ...now];
+    if (!frames.length) throw new Error("keine Frames");
+
+    $("scrub").max = frames.length - 1;
+    nowIdx = Math.max(0, past.length - 1); // Grenze Radar/Vorhersage (~jetzt)
+    idx = nowIdx;                          // Start beim aktuellsten Messbild
+    renderAxis();
+    show(idx);
+    $("controls").hidden = false;
+    $("overlay").classList.remove("show");
+  }
+
+  let busy = false;
+  async function load(){
+    if (busy) return; busy = true;
+    try{
+      const res = await fetch(API, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      const wasPlaying = playing;
+      pause();
+      rebuild(json);
+      if (wasPlaying) play();
+    }catch(e){
+      console.error(e);
+      $("overlay").classList.add("show");
+    }finally{ busy = false; }
+  }
+
+  // Stundenvorhersage (Open-Meteo) — unabhängig vom Radar
+  // Farbe nach Intensität (mm/h), passend zur Radar-Legende
+  function rainColor(mm){
+    if (mm >= 5)   return "#7E58C8";   // sehr stark
+    if (mm >= 2)   return "#2C6FC6";   // stark
+    if (mm >= 0.5) return "#3FA0E0";   // mäßig
+    return "#9BE1F5";                  // leicht
+  }
+
+  function renderForecast(h){
+    const times = h.time || [], pr = h.precipitation || [], pp = h.precipitation_probability || [];
+    const n = Math.min(times.length, FC_HOURS);
+    if (!n){ $("fc").hidden = true; return; }
+    const vals = pr.slice(0, n);
+    const max = Math.max(0, ...vals);
+    const scale = Math.max(max, 0.3);           // relativ skalieren, mind. 0.3 mm als Referenz
+    const bars = $("bars"), hours = $("hours");
+    bars.innerHTML = ""; hours.innerHTML = "";
+    for (let i = 0; i < n; i++){
+      const mm = vals[i] || 0, dry = mm < 0.05;
+      const b = document.createElement("div");
+      b.className = "b" + (dry ? " dry" : "");
+      b.title = times[i].slice(11, 16) + " · " + mm.toFixed(1) + " mm/h"
+        + (pp[i] != null ? " · " + pp[i] + " %" : "");
+      const fill = document.createElement("div");
+      fill.className = "fill";
+      fill.style.height = (dry ? 2 : Math.max(4, mm / scale * 100)) + "%";
+      if (!dry) fill.style.background = rainColor(mm);
+      b.appendChild(fill);
+      bars.appendChild(b);
+      const s = document.createElement("span");
+      s.textContent = times[i].slice(11, 13);    // Stunde
+      hours.appendChild(s);
+    }
+    $("fcNote").textContent = max < 0.05 ? "kein Regen erwartet" : "bis " + max.toFixed(1) + " mm/h";
+    $("fc").hidden = false;
+  }
+
+  async function loadForecast(){
+    try{
+      const res = await fetch(FC_API, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const json = await res.json();
+      renderForecast(json.hourly || {});
+    }catch(e){ console.error("forecast", e); $("fc").hidden = true; }
+  }
+
+  // Events
+  $("play").addEventListener("click", () => playing ? pause() : play());
+  $("scrub").addEventListener("input", (e) => { pause(); show(parseInt(e.target.value, 10)); });
+  $("retry").addEventListener("click", load);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden){ load(); loadForecast(); } });
+  setInterval(() => { load(); loadForecast(); }, REFRESH_MS);
+
+  load();
+  loadForecast();
+})();
+</script>
+</body>
+</html>
